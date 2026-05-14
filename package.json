@@ -5,10 +5,21 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "bot": "node bot/index.js",
+    "db:push": "prisma db push",
+    "db:generate": "prisma generate",
+    "db:studio": "prisma studio",
+    "db:seed": "node prisma/seed.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.95.2",
+    "@prisma/client": "^6.19.3",
+    "@whiskeysockets/baileys": "^7.0.0-rc10",
+    "date-fns": "^4.1.0",
     "next": "16.2.6",
+    "pino": "^10.3.1",
+    "qrcode-terminal": "^0.12.0",
     "react": "19.2.4",
     "react-dom": "19.2.4"
   },
@@ -17,7 +28,10 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.4.2",
+    "prisma": "^6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }

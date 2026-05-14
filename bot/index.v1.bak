@@ -1,0 +1,409 @@
+/**
+ * 🐔 DISTRIPOLLO BOT - WhatsApp Bot con Baileys
+ *
+ * Para correrlo:
+ *   node bot/index.js
+ *
+ * La primera vez te pedirá escanear un QR con WhatsApp.
+ */
+
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+} = require("@whiskeysockets/baileys");
+const qrcode = require("qrcode-terminal");
+const pino = require("pino");
+const { PrismaClient } = require("@prisma/client");
+
+const prisma = new PrismaClient();
+const logger = pino({ level: "silent" });
+
+// ═══════════════════════════════════════════════
+// CONFIGURACIÓN
+// ═══════════════════════════════════════════════
+const EMPRESA_SLUG = "distripollo"; // por ahora hardcoded a 1 empresa
+
+// ═══════════════════════════════════════════════
+// ESTADO DE CONVERSACIONES (en memoria)
+// ═══════════════════════════════════════════════
+const conversaciones = new Map();
+
+function getEstado(jid) {
+  if (!conversaciones.has(jid)) {
+    conversaciones.set(jid, {
+      paso: "inicio",
+      pedido: { items: [] },
+      ultimoMensaje: Date.now(),
+    });
+  }
+  return conversaciones.get(jid);
+}
+
+function resetEstado(jid) {
+  conversaciones.delete(jid);
+}
+
+// ═══════════════════════════════════════════════
+// CONEXIÓN A WHATSAPP
+// ═══════════════════════════════════════════════
+async function startBot() {
+  const { state, saveCreds } = await useMultiFileAuthState("bot/auth");
+  const { version } = await fetchLatestBaileysVersion();
+
+  const sock = makeWASocket({
+    version,
+    auth: state,
+    logger,
+    printQRInTerminal: false,
+    browser: ["Distripollo Bot", "Chrome", "1.0.0"],
+  });
+
+  sock.ev.on("creds.update", saveCreds);
+
+  // ─── Manejar conexión ───
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect, qr } = update;
+
+    if (qr) {
+      console.log("\n📱 ESCANEA ESTE QR CON WHATSAPP:");
+      console.log("   Abre WhatsApp → Configuración → Dispositivos vinculados → Vincular dispositivo\n");
+      qrcode.generate(qr, { small: true });
+    }
+
+    if (connection === "close") {
+      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log("❌ Conexión cerrada. Reconectando:", shouldReconnect);
+      if (shouldReconnect) startBot();
+    } else if (connection === "open") {
+      console.log("\n✅ BOT CONECTADO A WHATSAPP");
+      console.log("   Esperando mensajes...\n");
+    }
+  });
+
+  // ─── Manejar mensajes entrantes ───
+  sock.ev.on("messages.upsert", async (m) => {
+    const msg = m.messages[0];
+
+    if (!msg.message) return;
+    if (msg.key.fromMe) return;
+    if (msg.key.remoteJid?.endsWith("@g.us")) return; // ignorar grupos
+
+    const jid = msg.key.remoteJid;
+    const texto = (
+      msg.message.conversation ||
+      msg.message.extendedTextMessage?.text ||
+      ""
+    ).trim();
+
+    if (!texto) return;
+
+    console.log(`📩 [${jid}]: ${texto}`);
+
+    try {
+      const respuesta = await procesarMensaje(jid, texto);
+      if (respuesta) {
+        await sock.sendMessage(jid, { text: respuesta });
+        console.log(`📤 [${jid}]: ${respuesta.substring(0, 80)}...`);
+      }
+    } catch (err) {
+      console.error("Error procesando mensaje:", err);
+      await sock.sendMessage(jid, {
+        text: "😅 Hubo un problemita. Un asesor te contactará pronto.",
+      });
+    }
+  });
+
+  return sock;
+}
+
+// ═══════════════════════════════════════════════
+// LÓGICA DEL BOT - Aquí está la inteligencia
+// ═══════════════════════════════════════════════
+async function procesarMensaje(jid, texto) {
+  const estado = getEstado(jid);
+  const textoLower = texto.toLowerCase();
+  const whatsapp = jid.replace("@s.whatsapp.net", "");
+
+  // Obtener empresa
+  const empresa = await prisma.empresa.findUnique({
+    where: { slug: EMPRESA_SLUG },
+    include: { productos: { where: { activo: true } } },
+  });
+
+  if (!empresa) {
+    return "⚠️ El sistema aún no está configurado. Contacta al administrador.";
+  }
+
+  // Comandos universales
+  if (["cancelar", "salir", "menu", "menú", "inicio"].includes(textoLower)) {
+    resetEstado(jid);
+    return saludarYMenu(empresa);
+  }
+
+  // ─── PASO: INICIO ───
+  if (estado.paso === "inicio") {
+    // Detectar opción del menú
+    if (texto === "1" || textoLower.includes("pedido")) {
+      estado.paso = "tomando_pedido";
+      return mostrarProductos(empresa);
+    }
+    if (texto === "2" || textoLower.includes("precios") || textoLower.includes("catálogo") || textoLower.includes("catalogo")) {
+      return mostrarProductos(empresa);
+    }
+    if (texto === "3" || textoLower.includes("estado")) {
+      return await consultarEstado(empresa.id, whatsapp);
+    }
+    if (texto === "4" || textoLower.includes("asesor") || textoLower.includes("humano")) {
+      resetEstado(jid);
+      return "👨 Un asesor se comunicará contigo pronto. Si es urgente, llama directamente al número de Distripollo.";
+    }
+
+    return saludarYMenu(empresa);
+  }
+
+  // ─── PASO: TOMANDO PEDIDO ───
+  if (estado.paso === "tomando_pedido") {
+    if (textoLower === "listo" || textoLower === "terminar" || textoLower === "no") {
+      if (estado.pedido.items.length === 0) {
+        return "🤔 Aún no agregaste productos. Escribe lo que quieres pedir, por ejemplo:\n\n_30 kg pechuga_\n_2 cajas de muslos_";
+      }
+      estado.paso = "confirmando_datos";
+      return pedirDatosCliente(estado);
+    }
+
+    // Intentar parsear el pedido
+    const item = parsearItem(texto, empresa.productos);
+    if (item) {
+      estado.pedido.items.push(item);
+      const total = estado.pedido.items.reduce((s, i) => s + i.subtotal, 0);
+
+      let resumen = `✅ Agregado: ${item.cantidad} ${item.unidad} ${item.nombre}\n`;
+      resumen += `   $${item.precioUnit.toLocaleString("es-CO")}/${item.unidad} = $${item.subtotal.toLocaleString("es-CO")}\n\n`;
+      resumen += `📦 *Pedido actual:*\n`;
+      estado.pedido.items.forEach((i) => {
+        resumen += `   • ${i.cantidad} ${i.unidad} ${i.nombre} - $${i.subtotal.toLocaleString("es-CO")}\n`;
+      });
+      resumen += `\n💰 *Total parcial: $${total.toLocaleString("es-CO")}*\n\n`;
+      resumen += `¿Algo más?\n_(Agrega otro producto o escribe *listo* para continuar)_`;
+
+      return resumen;
+    }
+
+    return `🤔 No entendí. Por favor escribe así:\n\n_30 kg pechuga_\n_5 pollos enteros_\n_10 kg muslos_\n\nO escribe *listo* si ya terminaste.`;
+  }
+
+  // ─── PASO: CONFIRMANDO DATOS ───
+  if (estado.paso === "confirmando_datos") {
+    // Esperamos: Nombre del negocio + Dirección
+    if (!estado.pedido.nombreNegocio) {
+      estado.pedido.nombreNegocio = texto;
+      return "📍 Perfecto. Ahora envíame tu *dirección completa*:";
+    }
+    if (!estado.pedido.direccion) {
+      estado.pedido.direccion = texto;
+      estado.paso = "eligiendo_fecha";
+      return "📅 ¿Para qué *fecha y hora* necesitas la entrega?\n\nEjemplo:\n_Mañana en la mañana_\n_Viernes en la tarde_\n_Lunes 18 a las 9am_";
+    }
+  }
+
+  // ─── PASO: ELIGIENDO FECHA ───
+  if (estado.paso === "eligiendo_fecha") {
+    estado.pedido.fechaEntrega = texto;
+    estado.paso = "confirmando_final";
+    return mostrarResumenFinal(estado);
+  }
+
+  // ─── PASO: CONFIRMACIÓN FINAL ───
+  if (estado.paso === "confirmando_final") {
+    if (textoLower === "confirmar" || textoLower === "si" || textoLower === "sí") {
+      try {
+        const numero = await guardarPedido(empresa.id, whatsapp, estado.pedido);
+        resetEstado(jid);
+        return `🎉 *¡Pedido confirmado!*\n\n📋 Número: *${numero}*\n\nUn asesor te contactará para coordinar la entrega y el pago.\n\n¡Gracias por confiar en ${empresa.nombre}! 🐔`;
+      } catch (err) {
+        console.error("Error guardando pedido:", err);
+        return "😅 Hubo un error guardando tu pedido. Un asesor te contactará pronto.";
+      }
+    }
+    if (textoLower === "cancelar" || textoLower === "no") {
+      resetEstado(jid);
+      return "❌ Pedido cancelado. Escribe *hola* cuando quieras hacer otro pedido.";
+    }
+    return "Responde *confirmar* para guardar el pedido o *cancelar* para descartarlo.";
+  }
+
+  return saludarYMenu(empresa);
+}
+
+// ═══════════════════════════════════════════════
+// HELPERS
+// ═══════════════════════════════════════════════
+function saludarYMenu(empresa) {
+  return `🐔 *¡Hola! Bienvenido a ${empresa.nombre}*\n\n¿Qué deseas hacer?\n\n1️⃣ Hacer un pedido\n2️⃣ Ver precios/catálogo\n3️⃣ Estado de mi pedido\n4️⃣ Hablar con un asesor\n\n_Responde con el número de la opción._`;
+}
+
+function mostrarProductos(empresa) {
+  if (empresa.productos.length === 0) {
+    return "⚠️ El catálogo aún no está disponible. Contacta al asesor.";
+  }
+
+  let msg = `📋 *Catálogo de ${empresa.nombre}*\n\n`;
+  const porCategoria = {};
+  empresa.productos.forEach((p) => {
+    const cat = p.categoria || "General";
+    if (!porCategoria[cat]) porCategoria[cat] = [];
+    porCategoria[cat].push(p);
+  });
+
+  Object.keys(porCategoria).forEach((cat) => {
+    msg += `*${cat.toUpperCase()}*\n`;
+    porCategoria[cat].forEach((p) => {
+      msg += `• ${p.nombre}: $${Number(p.precio).toLocaleString("es-CO")}/${p.unidad}\n`;
+    });
+    msg += `\n`;
+  });
+
+  msg += `\n💬 Para pedir, escribe la cantidad y producto. Ejemplo:\n_30 kg pechuga_\n_5 pollos enteros_`;
+  return msg;
+}
+
+function parsearItem(texto, productos) {
+  // Formato esperado: "30 kg pechuga" o "5 pollos enteros"
+  const match = texto.match(/(\d+(?:[.,]\d+)?)\s*(kg|kilos?|k|unidad|unidades|und|pollos?)?\s+(.+)/i);
+  if (!match) return null;
+
+  const cantidad = parseFloat(match[1].replace(",", "."));
+  const unidadTexto = (match[2] || "").toLowerCase();
+  const nombreBuscado = match[3].toLowerCase().trim();
+
+  const producto = productos.find((p) => {
+    const pn = p.nombre.toLowerCase();
+    return pn.includes(nombreBuscado) || nombreBuscado.includes(pn);
+  });
+
+  if (!producto) return null;
+
+  const precioUnit = Number(producto.precio);
+  return {
+    productoId: producto.id,
+    nombre: producto.nombre,
+    cantidad,
+    unidad: producto.unidad,
+    precioUnit,
+    subtotal: cantidad * precioUnit,
+  };
+}
+
+function pedirDatosCliente(estado) {
+  const total = estado.pedido.items.reduce((s, i) => s + i.subtotal, 0);
+  let msg = `📦 *Resumen de tu pedido:*\n\n`;
+  estado.pedido.items.forEach((i) => {
+    msg += `• ${i.cantidad} ${i.unidad} ${i.nombre} - $${i.subtotal.toLocaleString("es-CO")}\n`;
+  });
+  msg += `\n💰 *Total: $${total.toLocaleString("es-CO")}*\n\n`;
+  msg += `Ahora dime el *nombre de tu negocio* (ej: Asadero El Buen Sabor):`;
+  return msg;
+}
+
+function mostrarResumenFinal(estado) {
+  const total = estado.pedido.items.reduce((s, i) => s + i.subtotal, 0);
+  let msg = `📋 *RESUMEN FINAL*\n\n`;
+  msg += `🏪 *Negocio:* ${estado.pedido.nombreNegocio}\n`;
+  msg += `📍 *Dirección:* ${estado.pedido.direccion}\n`;
+  msg += `📅 *Entrega:* ${estado.pedido.fechaEntrega}\n\n`;
+  msg += `📦 *Productos:*\n`;
+  estado.pedido.items.forEach((i) => {
+    msg += `• ${i.cantidad} ${i.unidad} ${i.nombre} - $${i.subtotal.toLocaleString("es-CO")}\n`;
+  });
+  msg += `\n💰 *Total: $${total.toLocaleString("es-CO")}*\n\n`;
+  msg += `Responde *confirmar* para guardar el pedido\nO *cancelar* para descartarlo`;
+  return msg;
+}
+
+async function guardarPedido(empresaId, whatsapp, pedido) {
+  // Buscar o crear cliente
+  let cliente = await prisma.cliente.findUnique({
+    where: { empresaId_whatsapp: { empresaId, whatsapp } },
+  });
+
+  if (!cliente) {
+    cliente = await prisma.cliente.create({
+      data: {
+        empresaId,
+        whatsapp,
+        nombre: pedido.nombreNegocio,
+        direccion: pedido.direccion,
+      },
+    });
+  } else {
+    // Actualizar datos por si cambió
+    cliente = await prisma.cliente.update({
+      where: { id: cliente.id },
+      data: {
+        nombre: pedido.nombreNegocio,
+        direccion: pedido.direccion,
+        ultimoPedido: new Date(),
+      },
+    });
+  }
+
+  // Generar número de pedido
+  const numero = "DP-" + Date.now().toString().slice(-8);
+
+  // Calcular total
+  const total = pedido.items.reduce((s, i) => s + i.subtotal, 0);
+
+  // Crear pedido
+  await prisma.pedido.create({
+    data: {
+      numero,
+      empresaId,
+      clienteId: cliente.id,
+      total,
+      notas: `Fecha solicitada: ${pedido.fechaEntrega}`,
+      items: {
+        create: pedido.items.map((i) => ({
+          productoId: i.productoId,
+          cantidad: i.cantidad,
+          unidad: i.unidad,
+          precioUnit: i.precioUnit,
+          subtotal: i.subtotal,
+        })),
+      },
+    },
+  });
+
+  return numero;
+}
+
+async function consultarEstado(empresaId, whatsapp) {
+  const pedidos = await prisma.pedido.findMany({
+    where: {
+      empresaId,
+      cliente: { whatsapp },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 3,
+    include: { items: { include: { producto: true } } },
+  });
+
+  if (pedidos.length === 0) {
+    return "📭 Aún no tienes pedidos registrados. Escribe *1* para hacer tu primer pedido.";
+  }
+
+  let msg = `📋 *Tus últimos pedidos:*\n\n`;
+  pedidos.forEach((p) => {
+    msg += `*${p.numero}* - ${p.estado}\n`;
+    msg += `💰 $${Number(p.total).toLocaleString("es-CO")}\n`;
+    msg += `📅 ${p.createdAt.toLocaleDateString("es-CO")}\n\n`;
+  });
+  return msg;
+}
+
+// ═══════════════════════════════════════════════
+// INICIAR
+// ═══════════════════════════════════════════════
+console.log("🐔 Distripollo Bot iniciando...");
+startBot().catch(console.error);
