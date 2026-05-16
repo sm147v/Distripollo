@@ -9,143 +9,178 @@ datasource db {
 }
 
 model Empresa {
-  id          Int       @id @default(autoincrement())
-  nombre      String
-  slug        String    @unique
-  whatsapp    String?
-  activa      Boolean   @default(true)
-  createdAt   DateTime  @default(now())
-  productos   Producto[]
-  clientes    Cliente[]
-  pedidos     Pedido[]
-  zonas       Zona[]
-  usuarios    Usuario[]
-  mayoristas  Mayorista[]
+  id         Int         @id @default(autoincrement())
+  nombre     String
+  slug       String      @unique
+  whatsapp   String?
+  activa     Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  productos  Producto[]
+  clientes   Cliente[]
+  pedidos    Pedido[]
+  zonas      Zona[]
+  usuarios   Usuario[]
+  mayoristas Mayorista[]
+  rutas      Ruta[]
 }
 
 model Usuario {
-  id          Int       @id @default(autoincrement())
-  empresaId   Int
-  empresa     Empresa   @relation(fields: [empresaId], references: [id])
-  email       String    @unique
-  password    String
-  nombre      String
-  rol         String    @default("ADMIN")
-  createdAt   DateTime  @default(now())
+  id        Int      @id @default(autoincrement())
+  empresaId Int
+  empresa   Empresa  @relation(fields: [empresaId], references: [id])
+  email     String   @unique
+  password  String
+  nombre    String
+  rol       String   @default("ADMIN")
+  createdAt DateTime @default(now())
 }
 
 model Producto {
-  id            Int       @id @default(autoincrement())
-  empresaId     Int
-  empresa       Empresa   @relation(fields: [empresaId], references: [id])
-  nombre        String
-  descripcion   String?
-  precio        Decimal   @db.Decimal(10, 2)
-  precioMayor   Decimal?  @db.Decimal(10, 2)
-  unidad        String
-  categoria     String?
-  activo        Boolean   @default(true)
-  stock         Decimal?  @db.Decimal(10, 2)
-  imagen        String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  itemsPedido   ItemPedido[]
+  id          Int          @id @default(autoincrement())
+  empresaId   Int
+  empresa     Empresa      @relation(fields: [empresaId], references: [id])
+  nombre      String
+  descripcion String?
+  precio      Decimal      @db.Decimal(10, 2)
+  precioMayor Decimal?     @db.Decimal(10, 2)
+  unidad      String
+  categoria   String?
+  activo      Boolean      @default(true)
+  stock       Decimal?     @db.Decimal(10, 2)
+  imagen      String?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  itemsPedido ItemPedido[]
 }
 
 model Cliente {
-  id            Int       @id @default(autoincrement())
-  empresaId     Int
-  empresa       Empresa   @relation(fields: [empresaId], references: [id])
-  whatsapp      String
-  nombre        String
+  id             Int        @id @default(autoincrement())
+  empresaId      Int
+  empresa        Empresa    @relation(fields: [empresaId], references: [id])
+  whatsapp       String
+  nombre         String
   contactoNombre String?
-  direccion     String?
-  zonaId        Int?
-  zona          Zona?     @relation(fields: [zonaId], references: [id])
-  esMayorista   Boolean   @default(false)
-  mayoristaId   Int?
-  mayorista     Mayorista? @relation(fields: [mayoristaId], references: [id])
-  manejaCredito Boolean   @default(false)
-  diasCredito   Int?
-  creditoMax    Decimal?  @db.Decimal(10, 2)
-  notas         String?
-  createdAt     DateTime  @default(now())
-  ultimoPedido  DateTime?
-  pedidos       Pedido[]
+  direccion      String?
+  zonaId         Int?
+  zona           Zona?      @relation(fields: [zonaId], references: [id])
+  esMayorista    Boolean    @default(false)
+  mayoristaId    Int?
+  mayorista      Mayorista? @relation(fields: [mayoristaId], references: [id])
+  manejaCredito  Boolean    @default(false)
+  diasCredito    Int?
+  creditoMax     Decimal?   @db.Decimal(10, 2)
+  notas          String?
+  createdAt      DateTime   @default(now())
+  ultimoPedido   DateTime?
+  pedidos        Pedido[]
+
   @@unique([empresaId, whatsapp])
   @@index([empresaId])
 }
 
 model Mayorista {
-  id              Int       @id @default(autoincrement())
-  empresaId       Int
-  empresa         Empresa   @relation(fields: [empresaId], references: [id])
-  documento       String    // CC o NIT
-  tipoDocumento   String    @default("CC") // CC, NIT
-  razonSocial     String    // Nombre del negocio
-  contactoNombre  String?
-  whatsapp        String?
-  email           String?
-  direccion       String?
-  activo          Boolean   @default(true)
-  descuentoExtra  Decimal?  @db.Decimal(5, 2) // % extra de descuento sobre precio mayorista
-  notas           String?
-  createdAt       DateTime  @default(now())
-  clientes        Cliente[]
+  id             Int       @id @default(autoincrement())
+  empresaId      Int
+  empresa        Empresa   @relation(fields: [empresaId], references: [id])
+  documento      String // CC o NIT
+  tipoDocumento  String    @default("CC") // CC, NIT
+  razonSocial    String // Nombre del negocio
+  contactoNombre String?
+  whatsapp       String?
+  email          String?
+  direccion      String?
+  activo         Boolean   @default(true)
+  descuentoExtra Decimal?  @db.Decimal(5, 2) // % extra de descuento sobre precio mayorista
+  notas          String?
+  createdAt      DateTime  @default(now())
+  clientes       Cliente[]
+
   @@unique([empresaId, documento])
 }
 
 model Zona {
-  id          Int       @id @default(autoincrement())
-  empresaId   Int
-  empresa     Empresa   @relation(fields: [empresaId], references: [id])
-  nombre      String
-  color       String?   @default("#E63946")
-  clientes    Cliente[]
-  pedidos     Pedido[]
+  id        Int       @id @default(autoincrement())
+  empresaId Int
+  empresa   Empresa   @relation(fields: [empresaId], references: [id])
+  nombre    String
+  color     String?   @default("#E63946")
+  clientes  Cliente[]
+  pedidos   Pedido[]
+  rutas     Ruta[]
 }
 
 model Pedido {
-  id            Int           @id @default(autoincrement())
-  numero        String        @unique
-  empresaId     Int
-  empresa       Empresa       @relation(fields: [empresaId], references: [id])
-  clienteId     Int
-  cliente       Cliente       @relation(fields: [clienteId], references: [id])
-  zonaId        Int?
-  zona          Zona?         @relation(fields: [zonaId], references: [id])
-  estado        String        @default("NUEVO")
-  total         Decimal       @db.Decimal(10, 2)
-  esMayorista   Boolean       @default(false)
-  metodoPago    String?
-  pagado        Boolean       @default(false)
-  fechaEntrega  DateTime?
-  horaEntrega   String?
-  notas         String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  items         ItemPedido[]
+  latitud      Decimal?     @db.Decimal(10, 7)
+  longitud     Decimal?     @db.Decimal(10, 7)
+  rutaId       Int?
+  ruta         Ruta?        @relation(fields: [rutaId], references: [id])
+  ordenEnRuta  Int?
+  id           Int          @id @default(autoincrement())
+  numero       String       @unique
+  empresaId    Int
+  empresa      Empresa      @relation(fields: [empresaId], references: [id])
+  clienteId    Int
+  cliente      Cliente      @relation(fields: [clienteId], references: [id])
+  zonaId       Int?
+  zona         Zona?        @relation(fields: [zonaId], references: [id])
+  estado       String       @default("NUEVO")
+  total        Decimal      @db.Decimal(10, 2)
+  esMayorista  Boolean      @default(false)
+  metodoPago   String?
+  pagado       Boolean      @default(false)
+  fechaEntrega DateTime?
+  horaEntrega  String?
+  notas        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  items        ItemPedido[]
+
   @@index([empresaId, estado])
   @@index([fechaEntrega])
 }
 
 model ItemPedido {
-  id          Int       @id @default(autoincrement())
-  pedidoId    Int
-  pedido      Pedido    @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
-  productoId  Int
-  producto    Producto  @relation(fields: [productoId], references: [id])
-  cantidad    Decimal   @db.Decimal(10, 2)
-  unidad      String
-  precioUnit  Decimal   @db.Decimal(10, 2)
-  subtotal    Decimal   @db.Decimal(10, 2)
+  id         Int      @id @default(autoincrement())
+  pedidoId   Int
+  pedido     Pedido   @relation(fields: [pedidoId], references: [id], onDelete: Cascade)
+  productoId Int
+  producto   Producto @relation(fields: [productoId], references: [id])
+  cantidad   Decimal  @db.Decimal(10, 2)
+  unidad     String
+  precioUnit Decimal  @db.Decimal(10, 2)
+  subtotal   Decimal  @db.Decimal(10, 2)
 }
 
 model Conversacion {
-  id          Int       @id @default(autoincrement())
-  whatsapp    String    @unique
-  estado      String    @default("INICIO")
-  contexto    Json?
-  pedidoTemp  Json?
-  updatedAt   DateTime  @updatedAt
+  id         Int      @id @default(autoincrement())
+  whatsapp   String   @unique
+  estado     String   @default("INICIO")
+  contexto   Json?
+  pedidoTemp Json?
+  updatedAt  DateTime @updatedAt
+}
+
+// ════════════════════════════════════════════════
+// RUTA - Para optimizar entregas
+// ════════════════════════════════════════════════
+model Ruta {
+  id            Int      @id @default(autoincrement())
+  empresaId     Int
+  empresa       Empresa  @relation(fields: [empresaId], references: [id])
+  nombre        String // "Ruta Norte 15 nov"
+  fecha         DateTime
+  zonaId        Int?
+  zona          Zona?    @relation(fields: [zonaId], references: [id])
+  estado        String   @default("PENDIENTE") // PENDIENTE, EN_CURSO, COMPLETADA
+  motorizado    String?
+  totalPedidos  Int      @default(0)
+  totalDinero   Decimal  @default(0) @db.Decimal(12, 2)
+  urlGoogleMaps String?
+  ordenOptimo   Json? // [pedidoId1, pedidoId2, ...]
+  notas         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  pedidos       Pedido[]
+
+  @@index([empresaId, fecha])
 }
