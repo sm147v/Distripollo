@@ -35,6 +35,19 @@ model Usuario {
   createdAt DateTime @default(now())
 }
 
+/// Operador a nivel PLATAFORMA (super-admin). Intencionalmente SIN empresaId:
+/// está por encima de todos los tenants. Tabla separada de Usuario para aislar
+/// también a nivel de datos — un super-admin no es un Usuario con un rol especial.
+model SuperAdmin {
+  id          Int       @id @default(autoincrement())
+  email       String    @unique
+  password    String
+  nombre      String
+  activo      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  ultimoLogin DateTime?
+}
+
 model Producto {
   id          Int          @id @default(autoincrement())
   empresaId   Int

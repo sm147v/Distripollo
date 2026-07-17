@@ -10,7 +10,8 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:seed": "node prisma/seed.js"
+    "db:seed": "node prisma/seed.js",
+    "test": "node --import tsx --test \"lib/**/*.check.ts\""
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
